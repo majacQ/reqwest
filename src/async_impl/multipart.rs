@@ -334,7 +334,7 @@ impl<P: PartProps> FormParts<P> {
                     let header = self.percent_encoding.encode_headers(name, field.metadata());
                     let header_length = header.len();
                     self.computed_headers.push(header);
-                    // The additions mimick the format string out of which the field is constructed
+                    // The additions mimic the format string out of which the field is constructed
                     // in Reader. Not the cleanest solution because if that format string is
                     // ever changed then this formula needs to be changed too which is not an
                     // obvious dependency in the code.
@@ -408,7 +408,7 @@ impl PartMetadata {
     }
 }
 
-/// https://url.spec.whatwg.org/#fragment-percent-encode-set
+// https://url.spec.whatwg.org/#fragment-percent-encode-set
 const FRAGMENT_ENCODE_SET: &AsciiSet = &percent_encoding::CONTROLS
     .add(b' ')
     .add(b'"')
@@ -416,12 +416,12 @@ const FRAGMENT_ENCODE_SET: &AsciiSet = &percent_encoding::CONTROLS
     .add(b'>')
     .add(b'`');
 
-/// https://url.spec.whatwg.org/#path-percent-encode-set
+// https://url.spec.whatwg.org/#path-percent-encode-set
 const PATH_ENCODE_SET: &AsciiSet = &FRAGMENT_ENCODE_SET.add(b'#').add(b'?').add(b'{').add(b'}');
 
 const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &PATH_ENCODE_SET.add(b'/').add(b'%');
 
-/// https://tools.ietf.org/html/rfc8187#section-3.2.1
+// https://tools.ietf.org/html/rfc8187#section-3.2.1
 const ATTR_CHAR_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'!')
     .remove(b'#')
@@ -521,8 +521,7 @@ mod tests {
     fn form_empty() {
         let form = Form::new();
 
-        let mut rt = runtime::Builder::new()
-            .basic_scheduler()
+        let rt = runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("new rt");
@@ -572,8 +571,7 @@ mod tests {
              --boundary\r\n\
              Content-Disposition: form-data; name=\"key3\"; filename=\"filename\"\r\n\r\n\
              value3\r\n--boundary--\r\n";
-        let mut rt = runtime::Builder::new()
-            .basic_scheduler()
+        let rt = runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("new rt");
@@ -603,8 +601,7 @@ mod tests {
                         \r\n\
                         value2\r\n\
                         --boundary--\r\n";
-        let mut rt = runtime::Builder::new()
-            .basic_scheduler()
+        let rt = runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("new rt");

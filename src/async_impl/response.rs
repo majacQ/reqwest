@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::fmt;
 use std::net::SocketAddr;
+use std::pin::Pin;
 
 use bytes::Bytes;
 use encoding_rs::{Encoding, UTF_8};
@@ -12,13 +13,14 @@ use mime::Mime;
 use serde::de::DeserializeOwned;
 #[cfg(feature = "json")]
 use serde_json;
-use tokio::time::Delay;
+use tokio::time::Sleep;
 use url::Url;
 
 use super::body::Body;
 use super::decoder::{Accepts, Decoder};
 #[cfg(feature = "cookies")]
 use crate::cookie;
+use crate::response::ResponseUrl;
 
 /// A Response to a submitted `Request`.
 pub struct Response {
@@ -37,7 +39,7 @@ impl Response {
         res: hyper::Response<hyper::Body>,
         url: Url,
         accepts: Accepts,
-        timeout: Option<Delay>,
+        timeout: Option<Pin<Box<Sleep>>>,
     ) -> Response {
         let (parts, body) = res.into_parts();
         let status = parts.status;
@@ -102,6 +104,7 @@ impl Response {
     ///
     /// This requires the optional `cookies` feature to be enabled.
     #[cfg(feature = "cookies")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "cookies")))]
     pub fn cookies<'a>(&'a self) -> impl Iterator<Item = cookie::Cookie<'a>> + 'a {
         cookie::extract_response_cookies(&self.headers).filter_map(Result::ok)
     }
@@ -235,6 +238,7 @@ impl Response {
     ///
     /// [`serde_json::from_reader`]: https://docs.serde.rs/serde_json/fn.from_reader.html
     #[cfg(feature = "json")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
     pub async fn json<T: DeserializeOwned>(self) -> crate::Result<T> {
         let full = self.bytes().await?;
 
@@ -307,6 +311,7 @@ impl Response {
     ///
     /// This requires the optional `stream` feature to be enabled.
     #[cfg(feature = "stream")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "stream")))]
     pub fn bytes_stream(self) -> impl futures_core::Stream<Item = crate::Result<Bytes>> {
         self.body
     }
@@ -422,44 +427,12 @@ impl From<Response> for Body {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct ResponseUrl(Url);
-
-/// Extension trait for http::response::Builder objects
-///
-/// Allows the user to add a `Url` to the http::Response
-pub trait ResponseBuilderExt {
-    /// A builder method for the `http::response::Builder` type that allows the user to add a `Url`
-    /// to the `http::Response`
-    fn url(self, url: Url) -> Self;
-}
-
-impl ResponseBuilderExt for http::response::Builder {
-    fn url(self, url: Url) -> Self {
-        self.extension(ResponseUrl(url))
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Response, ResponseBuilderExt, ResponseUrl};
+    use super::Response;
+    use crate::ResponseBuilderExt;
     use http::response::Builder;
     use url::Url;
-
-    #[test]
-    fn test_response_builder_ext() {
-        let url = Url::parse("http://example.com").unwrap();
-        let response = Builder::new()
-            .status(200)
-            .url(url.clone())
-            .body(())
-            .unwrap();
-
-        assert_eq!(
-            response.extensions().get::<ResponseUrl>(),
-            Some(&ResponseUrl(url))
-        );
-    }
 
     #[test]
     fn test_from_http_response() {
@@ -471,7 +444,7 @@ mod tests {
             .unwrap();
         let response = Response::from(response);
 
-        assert_eq!(response.status, 200);
-        assert_eq!(response.url, Box::new(url));
+        assert_eq!(response.status(), 200);
+        assert_eq!(*response.url(), url);
     }
 }

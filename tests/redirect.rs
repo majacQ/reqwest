@@ -155,14 +155,15 @@ fn test_redirect_307_does_not_try_if_reader_cannot_reset() {
 async fn test_redirect_removes_sensitive_headers() {
     use tokio::sync::watch;
 
-    let (tx, rx) = watch::channel(None);
+    let (tx, rx) = watch::channel::<Option<std::net::SocketAddr>>(None);
 
     let end_server = server::http(move |req| {
         let mut rx = rx.clone();
         async move {
             assert_eq!(req.headers().get("cookie"), None);
 
-            let mid_addr = rx.recv().await.unwrap().unwrap();
+            rx.changed().await.unwrap();
+            let mid_addr = rx.borrow().unwrap();
             assert_eq!(
                 req.headers()["referer"],
                 format!("http://{}/sensitive", mid_addr)
@@ -182,7 +183,7 @@ async fn test_redirect_removes_sensitive_headers() {
             .unwrap()
     });
 
-    tx.broadcast(Some(mid_server.addr())).unwrap();
+    tx.send(Some(mid_server.addr())).unwrap();
 
     reqwest::Client::builder()
         .build()
@@ -314,4 +315,32 @@ async fn test_redirect_302_with_set_cookies() {
 
     assert_eq!(res.url().as_str(), dst);
     assert_eq!(res.status(), reqwest::StatusCode::OK);
+}
+
+#[cfg(feature = "__rustls")]
+#[tokio::test]
+#[ignore = "Needs TLS support in the test server"]
+async fn test_redirect_https_only_enforced_gh1312() {
+    let server = server::http(move |_req| async move {
+        http::Response::builder()
+            .status(302)
+            .header("location", "http://insecure")
+            .body(Default::default())
+            .unwrap()
+    });
+
+    let url = format!("https://{}/yikes", server.addr());
+
+    let res = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .use_rustls_tls()
+        .https_only(true)
+        .build()
+        .expect("client builder")
+        .get(&url)
+        .send()
+        .await;
+
+    let err = res.unwrap_err();
+    assert!(err.is_redirect());
 }

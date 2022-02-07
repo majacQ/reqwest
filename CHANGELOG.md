@@ -1,3 +1,76 @@
+## v0.11.9
+
+- Add `ClientBuilder::http09_responses(bool)` option to allow receiving HTTP/0.9 responses.
+- Fix HTTP/2 to retry requests interrupted by an HTTP/2 graceful shutdown.
+- Fix proxy loading from environment variables to ignore empty values.
+
+## v0.11.8
+
+- Update internal webpki-roots dependency.
+
+## v0.11.7
+
+- Add `blocking::ClientBuilder::resolve()` option, matching the async builder.
+- Implement `From<tokio::fs::File>` for `Body`.
+- Fix `blocking` request-scoped timeout applying to bodies as well.
+- (wasm) Fix request bodies using multipart vs formdata.
+- Update internal `rustls` to 0.20.
+
+## v0.11.6
+
+- (wasm) Fix request bodies more.
+
+## v0.11.5
+
+- Add `ClientBuilder::http1_only()` method.
+- Add `tls::Version` type, and `ClientBuilder::min_tls_version()` and `ClientBuilder::max_tls_version()` methods.
+- Implement `TryFrom<Request>` for `http::Request`.
+- Implement `Clone` for `Identity`.
+- Fix `NO_PROXY`environment variable parsing to more closely match curl's. Comma-separated entries are now trimmed for whitespace, and `*` is allowed to match everything.
+- Fix redirection to respect `https_only` option.
+- (wasm) Add `Body::as_bytes()` method.
+- (wasm) Fix sometimes wrong conversation of bytes into a `JsValue`.
+- (wasm) Avoid dependency on serde-serialize feature.
+
+## v0.11.4
+
+- Add `ClientBuilder::resolve()` option to override DNS resolution for specific domains.
+- Add `native-tls-alpn` Cargo feature to use ALPN with the native-tls backend.
+- Add `ClientBuilder::deflate()` option and `deflate` Cargo feature to support decoding response bodies using deflate.
+- Add `RequestBuilder::version()` to allow setting the HTTP version of a request.
+- Fix allowing "invalid" certificates with the `rustls-tls` backend, when the server uses TLS v1.2 or v1.3.
+- (wasm) Add `try_clone` to `Request` and `RequestBuilder`
+
+## v0.11.3
+
+- Add `impl From<hyper::Body> for reqwest::Body`.
+- (wasm) Add credentials mode methods to `RequestBuilder`.
+
+## v0.11.2
+
+- Add `CookieStore` trait to customize the type that stores and retrieves cookies for a session.
+- Add `cookie::Jar` as a default `CookieStore`, easing creating some session cookies before creating the `Client`.
+- Add `ClientBuilder::http2_adaptive_window()` option to configure an adaptive HTTP2 flow control behavior.
+- Add `ClientBuilder::http2_max_frame_size()` option to adjust the maximum HTTP2 frame size that can be received.
+- Implement `IntoUrl` for `String`, making it more convenient to create requests with `format!`.
+
+## v0.11.1
+
+- Add `ClientBuilder::tls_built_in_root_certs()` option to disable built-in root certificates.
+- Fix `rustls-tls` glue to more often support ALPN to upgrade to HTTP/2.
+- Fix proxy parsing to assume `http://` if no scheme is found.
+- Fix connection pool idle reaping by enabling hyper's `runtime` feature.
+- (wasm) Add `Request::new()` constructor.
+
+# v0.11.0
+
+- Change `multipart` to be an optional cargo feature.
+- Remove deprecated methods.
+
+- Update to Tokio v1.0.
+- Update to Bytes v1.0.
+- Update to hyper v0.14.
+
 ## v0.10.10
 
 - Add `tcp_keepalive` option to `blocking::ClientBuilder`.
@@ -88,7 +161,7 @@
 - Add `Response::bytes_stream()` method to get body as an `impl Stream`.
 - Add `Request::try_clone()` method.
 
-- Change default `Client` API to async. The previous blocking client API is avaialble at `reqwest::blocking`.
+- Change default `Client` API to async. The previous blocking client API is available at `reqwest::blocking`.
 - Change to no longer send a default `User-Agent` header. Add one via `ClientBuilder::user_agent()`.
 - Change to enable system/environment proxy detection by default.
 - Change `default-tls` feature to only include `ClientBuilder` options that both `native-tls` and `rustls` support.
@@ -173,7 +246,7 @@
 
 ### Features
 
-- Add `multipart::Form::percent_encode_noop()` to allow for servers which don't support percent encoding of paramters.
+- Add `multipart::Form::percent_encode_noop()` to allow for servers which don't support percent encoding of parameters.
 - Add `ClientBuilder::http1_title_case_headers()` to force request headers to use Title-Case.
 - Add `ClientBuilder::connect_timeout()` to allow setting only a connect timeout.
 
