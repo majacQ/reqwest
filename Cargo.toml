@@ -1,6 +1,10 @@
 [package]
 name = "reqwest"
+  <<<<<<< dependabot/npm_and_yarn/examples/wasm_github_fetch/tar-4.4.19
 version = "0.11.9" # remember to update html_root_url
+  =======
+version = "0.11.0-pre.0" # remember to update html_root_url
+  >>>>>>> 0.11.x-pre
 description = "higher level HTTP client library"
 keywords = ["http", "request", "client"]
 categories = ["web-programming::http-client", "wasm"]
@@ -11,6 +15,8 @@ readme = "README.md"
 license = "MIT/Apache-2.0"
 edition = "2018"
 autotests = true
+
+publish = false # 0.11.0 pre!
 
 [package.metadata.docs.rs]
 all-features = true
