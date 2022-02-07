@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 mod support;
 use support::*;
 
@@ -10,7 +11,7 @@ async fn client_timeout() {
     let server = server::http(move |_req| {
         async {
             // delay returning the response
-            tokio::time::delay_for(Duration::from_secs(2)).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
             http::Response::default()
         }
     });
@@ -37,7 +38,7 @@ async fn request_timeout() {
     let server = server::http(move |_req| {
         async {
             // delay returning the response
-            tokio::time::delay_for(Duration::from_secs(2)).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
             http::Response::default()
         }
     });
@@ -54,8 +55,35 @@ async fn request_timeout() {
 
     let err = res.unwrap_err();
 
-    assert!(err.is_timeout());
+    if cfg!(not(target_arch = "wasm32")) {
+        assert!(err.is_timeout() && !err.is_connect());
+    } else {
+        assert!(err.is_timeout());
+    }
     assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[tokio::test]
+async fn connect_timeout() {
+    let _ = env_logger::try_init();
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_millis(100))
+        .build()
+        .unwrap();
+
+    let url = "http://10.255.255.1:81/slow";
+
+    let res = client
+        .get(url)
+        .timeout(Duration::from_millis(1000))
+        .send()
+        .await;
+
+    let err = res.unwrap_err();
+
+    assert!(err.is_connect() && err.is_timeout());
 }
 
 #[tokio::test]
@@ -66,7 +94,7 @@ async fn response_timeout() {
         async {
             // immediate response, but delayed body
             let body = hyper::Body::wrap_stream(futures_util::stream::once(async {
-                tokio::time::delay_for(Duration::from_secs(2)).await;
+                tokio::time::sleep(Duration::from_secs(2)).await;
                 Ok::<_, std::convert::Infallible>("Hello")
             }));
 
@@ -76,6 +104,7 @@ async fn response_timeout() {
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(500))
+        .no_proxy()
         .build()
         .unwrap();
 
@@ -105,7 +134,7 @@ fn timeout_closes_connection() {
     let server = server::http(move |_req| {
         async {
             // delay returning the response
-            tokio::time::delay_for(Duration::from_secs(2)).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
             http::Response::default()
         }
     });
@@ -129,7 +158,7 @@ fn timeout_blocking_request() {
     let server = server::http(move |_req| {
         async {
             // delay returning the response
-            tokio::time::delay_for(Duration::from_secs(2)).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
             http::Response::default()
         }
     });
@@ -143,6 +172,43 @@ fn timeout_blocking_request() {
 
     assert!(err.is_timeout());
     assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
+}
+
+#[cfg(feature = "blocking")]
+#[test]
+fn blocking_request_timeout_body() {
+    let _ = env_logger::try_init();
+
+    let client = reqwest::blocking::Client::builder()
+        // this should be overridden
+        .connect_timeout(Duration::from_millis(200))
+        // this should be overridden
+        .timeout(Duration::from_millis(200))
+        .build()
+        .unwrap();
+
+    let server = server::http(move |_req| {
+        async {
+            // immediate response, but delayed body
+            let body = hyper::Body::wrap_stream(futures_util::stream::once(async {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                Ok::<_, std::convert::Infallible>("Hello")
+            }));
+
+            http::Response::new(body)
+        }
+    });
+
+    let url = format!("http://{}/closes", server.addr());
+    let res = client
+        .get(&url)
+        // longer than client timeout
+        .timeout(Duration::from_secs(5))
+        .send()
+        .expect("get response");
+
+    let text = res.text().unwrap();
+    assert_eq!(text, "Hello");
 }
 
 #[cfg(feature = "blocking")]
@@ -162,7 +228,7 @@ fn write_timeout_large_body() {
     let server = server::http(move |_req| {
         async {
             // delay returning the response
-            tokio::time::delay_for(Duration::from_secs(2)).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
             http::Response::default()
         }
     });

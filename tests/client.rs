@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 mod support;
 use futures_util::stream::StreamExt;
 use support::*;
@@ -23,12 +24,25 @@ async fn auto_headers() {
                 .unwrap()
                 .contains("br"));
         }
+        if cfg!(feature = "deflate") {
+            assert!(req.headers()["accept-encoding"]
+                .to_str()
+                .unwrap()
+                .contains("deflate"));
+        }
 
         http::Response::default()
     });
 
     let url = format!("http://{}/1", server.addr());
-    let res = reqwest::get(&url).await.unwrap();
+    let res = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .unwrap()
+        .get(&url)
+        .send()
+        .await
+        .unwrap();
 
     assert_eq!(res.url().as_str(), &url);
     assert_eq!(res.status(), reqwest::StatusCode::OK);
@@ -153,7 +167,55 @@ async fn body_pipe_response() {
     assert_eq!(res2.status(), reqwest::StatusCode::OK);
 }
 
-#[cfg(any(feature = "native-tls", feature = "rustls-tls",))]
+#[tokio::test]
+async fn overridden_dns_resolution_with_gai() {
+    let _ = env_logger::builder().is_test(true).try_init();
+    let server = server::http(move |_req| async { http::Response::new("Hello".into()) });
+
+    let overridden_domain = "rust-lang.org";
+    let url = format!(
+        "http://{}:{}/domain_override",
+        overridden_domain,
+        server.addr().port()
+    );
+    let client = reqwest::Client::builder()
+        .resolve(overridden_domain, server.addr())
+        .build()
+        .expect("client builder");
+    let req = client.get(&url);
+    let res = req.send().await.expect("request");
+
+    assert_eq!(res.status(), reqwest::StatusCode::OK);
+    let text = res.text().await.expect("Failed to get text");
+    assert_eq!("Hello", text);
+}
+
+#[cfg(feature = "trust-dns")]
+#[tokio::test]
+async fn overridden_dns_resolution_with_trust_dns() {
+    let _ = env_logger::builder().is_test(true).try_init();
+    let server = server::http(move |_req| async { http::Response::new("Hello".into()) });
+
+    let overridden_domain = "rust-lang.org";
+    let url = format!(
+        "http://{}:{}/domain_override",
+        overridden_domain,
+        server.addr().port()
+    );
+    let client = reqwest::Client::builder()
+        .resolve(overridden_domain, server.addr())
+        .trust_dns(true)
+        .build()
+        .expect("client builder");
+    let req = client.get(&url);
+    let res = req.send().await.expect("request");
+
+    assert_eq!(res.status(), reqwest::StatusCode::OK);
+    let text = res.text().await.expect("Failed to get text");
+    assert_eq!("Hello", text);
+}
+
+#[cfg(any(feature = "native-tls", feature = "__rustls",))]
 #[test]
 fn use_preconfigured_tls_with_bogus_backend() {
     struct DefinitelyNotTls;
@@ -179,15 +241,64 @@ fn use_preconfigured_native_tls_default() {
         .expect("preconfigured default tls");
 }
 
-#[cfg(feature = "rustls-tls")]
+#[cfg(feature = "__rustls")]
 #[test]
 fn use_preconfigured_rustls_default() {
     extern crate rustls;
 
-    let tls = rustls::ClientConfig::new();
+    let root_cert_store = rustls::RootCertStore::empty();
+    let tls = rustls::ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(root_cert_store)
+        .with_no_client_auth();
 
     reqwest::Client::builder()
         .use_preconfigured_tls(tls)
         .build()
         .expect("preconfigured rustls tls");
+}
+
+#[cfg(feature = "__rustls")]
+#[tokio::test]
+#[ignore = "Needs TLS support in the test server"]
+async fn http2_upgrade() {
+    let server = server::http(move |_| async move { http::Response::default() });
+
+    let url = format!("https://localhost:{}", server.addr().port());
+    let res = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .use_rustls_tls()
+        .build()
+        .expect("client builder")
+        .get(&url)
+        .send()
+        .await
+        .expect("request");
+
+    assert_eq!(res.status(), reqwest::StatusCode::OK);
+    assert_eq!(res.version(), reqwest::Version::HTTP_2);
+}
+
+#[cfg(feature = "default-tls")]
+#[tokio::test]
+async fn test_allowed_methods() {
+    let resp = reqwest::Client::builder()
+        .https_only(true)
+        .build()
+        .expect("client builder")
+        .get("https://google.com")
+        .send()
+        .await;
+
+    assert!(resp.is_ok());
+
+    let resp = reqwest::Client::builder()
+        .https_only(true)
+        .build()
+        .expect("client builder")
+        .get("http://google.com")
+        .send()
+        .await;
+
+    assert!(resp.is_err());
 }

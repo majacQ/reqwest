@@ -6,7 +6,12 @@ use std::task::{Context, Poll};
 use bytes::Bytes;
 use futures_core::Stream;
 use http_body::Body as HttpBody;
-use tokio::time::Delay;
+use pin_project_lite::pin_project;
+#[cfg(feature = "stream")]
+use tokio::fs::File;
+use tokio::time::Sleep;
+#[cfg(feature = "stream")]
+use tokio_util::io::ReaderStream;
 
 /// An asynchronous request body.
 pub struct Body {
@@ -26,11 +31,16 @@ enum Inner {
                     + Sync,
             >,
         >,
-        timeout: Option<Delay>,
+        timeout: Option<Pin<Box<Sleep>>>,
     },
 }
 
-struct WrapStream<S>(S);
+pin_project! {
+    struct WrapStream<S> {
+        #[pin]
+        inner: S,
+    }
+}
 
 struct WrapHyper(hyper::Body);
 
@@ -69,6 +79,7 @@ impl Body {
     ///
     /// This requires the `stream` feature to be enabled.
     #[cfg(feature = "stream")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "stream")))]
     pub fn wrap_stream<S>(stream: S) -> Body
     where
         S: futures_core::stream::TryStream + Send + Sync + 'static,
@@ -86,9 +97,9 @@ impl Body {
     {
         use futures_util::TryStreamExt;
 
-        let body = Box::pin(WrapStream(
-            stream.map_ok(Bytes::from).map_err(Into::into),
-        ));
+        let body = Box::pin(WrapStream {
+            inner: stream.map_ok(Bytes::from).map_err(Into::into),
+        });
         Body {
             inner: Inner::Streaming {
                 body,
@@ -97,7 +108,7 @@ impl Body {
         }
     }
 
-    pub(crate) fn response(body: hyper::Body, timeout: Option<Delay>) -> Body {
+    pub(crate) fn response(body: hyper::Body, timeout: Option<Pin<Box<Sleep>>>) -> Body {
         Body {
             inner: Inner::Streaming {
                 body: Box::pin(WrapHyper(body)),
@@ -146,10 +157,23 @@ impl Body {
         ImplStream(self)
     }
 
+    #[cfg(feature = "multipart")]
     pub(crate) fn content_length(&self) -> Option<u64> {
         match self.inner {
             Inner::Reusable(ref bytes) => Some(bytes.len() as u64),
             Inner::Streaming { ref body, .. } => body.size_hint().exact(),
+        }
+    }
+}
+
+impl From<hyper::Body> for Body {
+    #[inline]
+    fn from(body: hyper::Body) -> Body {
+        Self {
+            inner: Inner::Streaming {
+                body: Box::pin(WrapHyper(body)),
+                timeout: None,
+            },
         }
     }
 }
@@ -189,6 +213,15 @@ impl From<&'static str> for Body {
     }
 }
 
+#[cfg(feature = "stream")]
+#[cfg_attr(docsrs, doc(cfg(feature = "stream")))]
+impl From<File> for Body {
+    #[inline]
+    fn from(file: File) -> Body {
+        Body::wrap_stream(ReaderStream::new(file))
+    }
+}
+
 impl fmt::Debug for Body {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Body").finish()
@@ -211,7 +244,7 @@ impl HttpBody for ImplStream {
                 ref mut timeout,
             } => {
                 if let Some(ref mut timeout) = timeout {
-                    if let Poll::Ready(()) = Pin::new(timeout).poll(cx) {
+                    if let Poll::Ready(()) = timeout.as_mut().poll(cx) {
                         return Poll::Ready(Some(Err(crate::error::body(crate::error::TimedOut))));
                     }
                 }
@@ -279,11 +312,7 @@ where
         self: Pin<&mut Self>,
         cx: &mut Context,
     ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
-        // safe pin projection
-        let item =
-            futures_core::ready!(
-                unsafe { Pin::new_unchecked(&mut self.get_unchecked_mut().0) }.poll_next(cx)?
-            );
+        let item = futures_core::ready!(self.project().inner.poll_next(cx)?);
 
         Poll::Ready(item.map(|val| Ok(val.into())))
     }

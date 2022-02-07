@@ -1,8 +1,9 @@
 use std::future::Future;
+use std::io;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{self, Poll};
-use std::io;
 
 use hyper::client::connect::dns as hyper_dns;
 use hyper::service::Service;
@@ -10,7 +11,7 @@ use tokio::sync::Mutex;
 use trust_dns_resolver::{
     config::{ResolverConfig, ResolverOpts},
     lookup_ip::LookupIpIntoIter,
-    system_conf, AsyncResolver, TokioConnection, TokioConnectionProvider,
+    system_conf, AsyncResolver, TokioConnection, TokioConnectionProvider, TokioHandle,
 };
 
 use crate::error::BoxError;
@@ -18,12 +19,17 @@ use crate::error::BoxError;
 type SharedResolver = Arc<AsyncResolver<TokioConnection, TokioConnectionProvider>>;
 
 lazy_static! {
-    static ref SYSTEM_CONF: io::Result<(ResolverConfig, ResolverOpts)> = system_conf::read_system_conf().map_err(io::Error::from);
+    static ref SYSTEM_CONF: io::Result<(ResolverConfig, ResolverOpts)> =
+        system_conf::read_system_conf().map_err(io::Error::from);
 }
 
 #[derive(Clone)]
 pub(crate) struct TrustDnsResolver {
     state: Arc<Mutex<State>>,
+}
+
+pub(crate) struct SocketAddrs {
+    iter: LookupIpIntoIter,
 }
 
 enum State {
@@ -47,7 +53,7 @@ impl TrustDnsResolver {
 }
 
 impl Service<hyper_dns::Name> for TrustDnsResolver {
-    type Response = LookupIpIntoIter;
+    type Response = SocketAddrs;
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -62,10 +68,10 @@ impl Service<hyper_dns::Name> for TrustDnsResolver {
 
             let resolver = match &*lock {
                 State::Init => {
-                    let resolver = new_resolver(tokio::runtime::Handle::current()).await?;
+                    let resolver = new_resolver().await?;
                     *lock = State::Ready(resolver.clone());
                     resolver
-                },
+                }
                 State::Ready(resolver) => resolver.clone(),
             };
 
@@ -74,18 +80,26 @@ impl Service<hyper_dns::Name> for TrustDnsResolver {
             drop(lock);
 
             let lookup = resolver.lookup_ip(name.as_str()).await?;
-            Ok(lookup.into_iter())
+            Ok(SocketAddrs {
+                iter: lookup.into_iter(),
+            })
         })
     }
 }
 
-/// Takes a `Handle` argument as an indicator that it must be called from
-/// within the context of a Tokio runtime.
-async fn new_resolver(handle: tokio::runtime::Handle) -> Result<SharedResolver, BoxError> {
+impl Iterator for SocketAddrs {
+    type Item = SocketAddr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|ip_addr| SocketAddr::new(ip_addr, 0))
+    }
+}
+
+async fn new_resolver() -> Result<SharedResolver, BoxError> {
     let (config, opts) = SYSTEM_CONF
         .as_ref()
         .expect("can't construct TrustDnsResolver if SYSTEM_CONF is error")
         .clone();
-    let resolver = AsyncResolver::new(config, opts, handle).await?;
+    let resolver = AsyncResolver::new(config, opts, TokioHandle)?;
     Ok(Arc::new(resolver))
 }

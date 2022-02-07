@@ -282,9 +282,49 @@ fn test_blocking_inside_a_runtime() {
 
     let url = format!("http://{}/text", server.addr());
 
-    let mut rt = tokio::runtime::Builder::new().build().expect("new rt");
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("new rt");
 
     rt.block_on(async move {
         let _should_panic = reqwest::blocking::get(&url);
     });
+}
+
+#[cfg(feature = "default-tls")]
+#[test]
+fn test_allowed_methods_blocking() {
+    let resp = reqwest::blocking::Client::builder()
+        .https_only(true)
+        .build()
+        .expect("client builder")
+        .get("https://google.com")
+        .send();
+
+    assert_eq!(resp.is_err(), false);
+
+    let resp = reqwest::blocking::Client::builder()
+        .https_only(true)
+        .build()
+        .expect("client builder")
+        .get("http://google.com")
+        .send();
+
+    assert_eq!(resp.is_err(), true);
+}
+
+/// Test that a [`reqwest::blocking::Body`] can be created from [`bytes::Bytes`].
+#[test]
+fn test_body_from_bytes() {
+    let body = "abc";
+    // No external calls are needed. Only the request building is tested.
+    let request = reqwest::blocking::Client::builder()
+        .build()
+        .expect("Could not build the client")
+        .put("https://google.com")
+        .body(bytes::Bytes::from(body))
+        .build()
+        .expect("Invalid body");
+
+    assert_eq!(request.body().unwrap().as_bytes(), Some(body.as_bytes()));
 }

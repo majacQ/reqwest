@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 use std::convert::Infallible;
 use std::future::Future;
 use std::net;
@@ -43,8 +44,7 @@ where
 {
     //Spawn new runtime in thread to prevent reactor execution context conflict
     thread::spawn(move || {
-        let mut rt = runtime::Builder::new()
-            .basic_scheduler()
+        let rt = runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("new rt");
